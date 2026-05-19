@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+    <Document id="1253">
+        <Style id="1256">
+            <LineStyle id="1257">
+                <color>ff0000ff</color>
+                <colorMode>normal</colorMode>
+                <width>2</width>
+            </LineStyle>
+        </Style>
+        <Placemark id="1255">
+            <name>Drone 7 Path</name>
+            <styleUrl>#1256</styleUrl>
+            <LineString id="1254">
+                <altitudeMode>clampToGround</altitudeMode>
+                <coordinates>80.04856669372253,12.927786928885771,0.0 80.04856669372253,12.92988619275016,0.0</coordinates>
+            </LineString>
+        </Placemark>
+        <Placemark id="1259">
+            <name>1</name>
+            <Point id="1258">
+                <coordinates>80.04856669372253,12.927786928885771,0.0</coordinates>
+            </Point>
+        </Placemark>
+        <Placemark id="1261">
+            <name>2</name>
+            <Point id="1260">
+                <coordinates>80.04856669372253,12.92988619275016,0.0</coordinates>
+            </Point>
+        </Placemark>
+    </Document>
+</kml>
