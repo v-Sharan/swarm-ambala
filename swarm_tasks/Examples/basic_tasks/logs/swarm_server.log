@@ -18087,3 +18087,28 @@ Error in main loop: local variable 'origin' referenced before assignment
 SERVER STARTED
 Error in main loop: local variable 'origin' referenced before assignment
 SERVER STARTED
+SERVER STARTED
+SERVER STARTED
+SERVER STARTED
+SERVER STARTED
+SERVER STARTED
+SERVER STARTED
+SERVER STARTED
+Error in main loop: local variable 'x' referenced before assignment
+SERVER STARTED
+SERVER STARTED
+SERVER STARTED
+SERVER STARTED
+Error in main loop: _goto() takes 4 positional arguments but 5 were given
+SERVER STARTED
+SERVER STARTED
+SERVER STARTED
+Error in main loop: startswith() takes at least 1 argument (0 given)
+Error in main loop: startswith() takes at least 1 argument (0 given)
+SERVER STARTED
+Error in main loop: A value (73.81975496100301) in x_new is above the interpolation range's maximum value (33.17185015109837).
+Error in main loop: A value (73.81975496100301) in x_new is above the interpolation range's maximum value (33.17185015109837).
+SERVER STARTED
+Error in main loop: list index out of range
+SERVER STARTED
+Error in main loop: A value (73.81975496100301) in x_new is above the interpolation range's maximum value (33.17185015109837).

@@ -1137,7 +1137,7 @@ while 1:
                             origin, endDistance, [x[1], x[0]]
                         )
                         goal_xy.append((x / 2, y / 2))
-                    print(goal_xy, "goal")
+                    
                     goal = [0] * len(pos_array)
                     for uav_id in uav_list:
                         # Find matching bot index
@@ -1710,6 +1710,7 @@ while 1:
                         with open(path) as f_in:
                             reader = csv.reader(f_in)
                             num_lines[i] = len(list(reader))
+                # TODO
                 removed_grid_path_array_index = 0
                 removed_uav_grid = []
                 removed_grid_path_length = []
@@ -1774,6 +1775,7 @@ while 1:
                     search_loop_running = False
                     search_flag = False
                     break
+                # TODO
                 if include_uav_flag:
                     # Grow mission arrays to match the current swarm size in pos_array
                     while len(all_uav_csv_grid_array) < len(pos_array):
@@ -1849,6 +1851,7 @@ while 1:
                         num_lines,
                     )
 
+                # TODO
                 if remove_bot_flag:
                     print("remove_bot_flag", remove_bot_flag, remove_bot_array)
                     # Process removals in the exact order they occurred to keep arrays aligned

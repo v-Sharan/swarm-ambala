@@ -10,7 +10,6 @@ class SocketServer:
     def monitor(self):
         try:
             data, addr = self.sock.recvfrom(1024)  # Buffer size is 1024 bytes
-            print(f"Received message from {addr}: {data.decode()}")
             return data.decode(), addr
         except socket.error as e:
             print(f"Socket error: {e}")

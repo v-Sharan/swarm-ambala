@@ -63,7 +63,10 @@ class SwarmController:
         self.bot_speed = 3.0
         self.uav_home_pos = []
         self.different_height = [50, 60, 70, 80, 90, 100, 110, 120]
-        self.stop_swarm = StopSwarm()
+        self.isStop = False
+        
+        self.csv_file_paths = []
+
         self.sock3 = SocketServer(ip, 12002)
 
         documents_path = os.path.join(os.path.expanduser("~"), "Documents")
@@ -91,15 +94,41 @@ class SwarmController:
             self.uav_home_pos, num_bots=self.num_bots, env_name=self.file_name, speed=self.bot_speed
         )
         
+    def rebuild_simulation(self):
+        self.uav_home_pos = []
+        for vehicle in self.vehicles:
+            lat = vehicle.location.global_relative_frame.lat
+            lon = vehicle.location.global_relative_frame.lon
+            x, y = locatePosition.geoToCart(self.origin, self.endDistance, [lat, lon])
+            self.uav_home_pos.append((x / 2, y / 2))
+        self.origin = read_origin(self.file_name)
+        self.s = sim.Simulation(
+            self.uav_home_pos,
+            num_bots=self.num_bots,
+            env_name=self.file_name,
+            speed=self.bot_speed
+        )
+        
+    def _push_command(self):
+        self.isStop = True
+
+    def _peek_command(self):
+        return self.isStop
+
+    def _pop_command(self):
+        self.isStop = False
+        
     def monitor_socket(self):
         print("Starting socket monitor thread...")
         while True:
-            data, addr = self.sock3.monitor()  # Buffer size is 1024 bytes
+            data, addr = self.sock3.monitor()
             print(f"Received message from {addr}: {data} in sock3")
-            if data.lower() == "STOP":
-                print("STOP command received. Stopping the swarm...")
-                self.stop_swarm._push_command("STOP")
-    
+            if data.lower() == "stop":
+                self._push_command()
+                
+            if data.split(",")[0] == "origin":
+                self.origin = read_origin(self.file_name)
+
     def home_lock(self):
         print("Attempting to lock home positions for all vehicles...")
         self.home_pos = []
@@ -136,7 +165,7 @@ class SwarmController:
 
             if response == 0:
                 self.heartbeat_ip_timeout[i] = 30
-            else:  # Link is down.
+            else:
                 print("waiting...")
                 linkdown_flag = True
                 self.heartbeat_ip_timeout[i] = 30
@@ -291,10 +320,6 @@ class SwarmController:
                     if all(c == 1 for c in alt_count):
                         diff_done = True
                         break
-                if self.stop_swarm and self.stop_swarm._peek_command() == "STOP":
-                    print("STOP command detected in handle_different_height. Stopping the swarm...")
-                    self.stop_swarm._pop_command()  # Clear the command after processing
-                    break
             sleep(0.05)
             
             
@@ -308,9 +333,9 @@ class SwarmController:
         goal_latlon = json.loads(goal_array)
         print("goal_latlon", goal_latlon)
         goal_xy = []
-        for x in goal_latlon:
+        for latlon in goal_latlon:
             x, y = locatePosition.geoToCart(
-                self.origin, self.endDistance, [x[1], x[0]]
+                self.origin, self.endDistance, [latlon[1], latlon[0]]
             )
             goal_xy.append((x / 2, y / 2))
 
@@ -332,91 +357,224 @@ class SwarmController:
             self.specific_goal_pos,
         )
         
-        self.uav_home_pos = []
-        for vehicle in self.vehicles:
-            lat = vehicle.location.global_relative_frame.lat
-            lon = vehicle.location.global_relative_frame.lon
-            x, y = locatePosition.geoToCart(self.origin, self.endDistance, [lat, lon])
-            self.uav_home_pos.append((x / 2, y / 2))
-
-        self.origin = read_origin(self.file_name)
-        s = sim.Simulation(
-            self.uav_home_pos,
-            num_bots=self.num_bots,
-            env_name=self.file_name,
-            speed=self.bot_speed,
-        )
+        self.rebuild_simulation()
+        
         while True:
             sleep(sleep_times.get(self.num_bots, 0.1))
-            # if specific_bot_goal_flag:
-            #     specific_bot_goal_flag = False
-            #     previous_task_flag = False
-            #     break
 
-            for i, b in enumerate(s.swarm):
+            for i, b in enumerate(self.s.swarm):
+                if not self.specific_bot_goal_flag_array[i]:
+                    continue
+                goal[i] = self.specific_goal_pos[i][self.specific_goal_xy_index[i]]
+                dx = abs(goal[i][0] - b.x)
+                dy = abs(goal[i][1] - b.y)
+                if dx <= 5 and dy <= 5:
+                    self.specific_goal_xy_index[i] += 1
+                    if self.specific_goal_xy_index[i] == len(self.specific_goal_pos[i]):
+                        self.specific_bot_goal_flag_array[i] = False
+                        self.specific_goal_pos[i]             = 0
+                if all(not f for f in self.specific_bot_goal_flag_array):
+                    self.specific_bot_goal_flag = True
+                    break
                 if self.specific_bot_goal_flag_array[i]:
-                    goal[i] = self.specific_goal_pos[i][self.specific_goal_xy_index[i]]
-                    # current_position = [b.x, b.y]
-                    if self.specific_bot_goal_flag_array[i]:
-                        dx = abs(goal[i][0] - b.x)
-                        dy = abs(goal[i][1] - b.y)
+                    b.set_goal(goal[i][0], goal[i][1])
+                    cmd = cvg.goal_area_cvg(i, b, goal[i])
+                    # _proximity_check(i, b)
+                    cmd.exec(b)
+                    
+                    lat, lon = locatePosition.cartToGeo(self.origin, self.endDistance, [b.x * 2, b.y * 2])
+                    self._goto(i, lat, lon)
+            
+            if self._peek_command():
+                print("STOP command detected in handle_specific_bot_goal. Stopping the swarm...")
+                self._pop_command()  # Clear the command after processing
+                break
+            
+    def handle_goal(self,data):
+        self.specific_bot_goal_flag_array = [False] * self.num_bots
+        _ ,loc = data.split("_")
+        goal_latlon = json.loads(loc)
+        goal_xy = []
+        bot_reached = [0] * self.num_bots
+        for latlon in goal_latlon:
+            x, y = locatePosition.geoToCart(
+                self.origin, self.endDistance, [latlon[1], latlon[0]]
+            )
+            goal_xy.append((x / 2, y / 2))
+        print("goal_xy", goal_xy)
+        goal_xy_index = 0
+        self.rebuild_simulation()
+        
+        while True:
+            sleep(sleep_times.get(self.num_bots, 0.1))
 
-                        if dx <= 5 and dy <= 5:
-                            # if dist <= 5:
-                            self.specific_goal_xy_index[i] = (
-                                self.specific_goal_xy_index[i] + 1
-                            )
-                            print(
-                                "specific_goal_xy_index", self.specific_goal_xy_index
-                            )
-                            if self.specific_goal_xy_index[i] == len(
-                                self.specific_goal_pos[i]
-                            ):
-                                self.specific_bot_goal_flag_array[i] = False
-                                self.specific_goal_pos[i] = 0
-                                print(
-                                    "specific_bot_goal_flag_array",
-                                    self.specific_bot_goal_flag_array,
-                                    self.specific_goal_pos,
-                                )
-                        print("self.specific_bot_goal_flag_array",self.specific_bot_goal_flag_array)
-                        if all(
-                            flag == False
-                            for flag in self.specific_bot_goal_flag_array
-                        ):
-                            print("self.specific_bot_goal_flag = True")
+            goal_position = goal_xy[goal_xy_index]
+            for i, b in enumerate(self.s.swarm):
+                current_position = [b.x, b.y]
+                dx = abs(goal_position[0] - current_position[0])
+                dy = abs(goal_position[1] - current_position[1])
+
+                if dx <= 5 and dy <= 5:
+                    bot_reached[i] = 1
+                    if (
+                        any(element == 1 for element in bot_reached)
+                        and goal_xy_index != len(goal_xy) - 1
+                    ):
+                        print("One reached", bot_reached)
+                        bot_reached = [0] * self.num_bots
+                        if goal_xy_index == len(goal_xy) - 1:
+                            print("group_goal_flag", group_goal_flag)
                             break
                         else:
-                            if self.specific_bot_goal_flag_array[i]:
-                                b.set_goal(goal[i][0], goal[i][1])
-                                cmd = cvg.goal_area_cvg(i, b, goal[i])
-                                
-                                cmd.exec(b)
-                        if master_flag:
-                            current_position = (b.x * 2, b.y * 2)
-                            lat, lon = locatePosition.cartToGeo(
-                                self.origin, self.endDistance, current_position
-                            )
-                            self._goto(i, lat, lon)
-            
-            if self.stop_swarm and self.stop_swarm._peek_command() == "STOP":
-                print("STOP command detected in handle_specific_bot_goal. Stopping the swarm...")
-                self.stop_swarm._pop_command()  # Clear the command after processing
+                            goal_xy_index += 1
+                    elif (
+                        all(element == 1 for element in bot_reached)
+                        and goal_xy_index == len(goal_xy) - 1
+                    ):
+                        bot_reached = [0] * self.num_bots
+                        if goal_xy_index == len(goal_xy) - 1:
+                            print("group_goal_flag", group_goal_flag)
+                            group_goal_flag = True
+                            break
+                        else:
+                            goal_xy_index += 1
+                else:
+                    b.set_goal(goal_position[0], goal_position[1])
+                    cmd = cvg.goal_area_cvg(i, b, goal_position)
+                    cmd.exec(b)
+                if master_flag:
+                    current_position = (b.x * 2, b.y * 2)
+                    lat, lon = locatePosition.cartToGeo(
+                        self.origin, self.endDistance, current_position
+                    )
+                    self._goto(i, lat, lon)
+
+            if self._peek_command():
+                print("STOP command detected in handle_goal. Stopping the swarm...")
+                self._pop_command()  # Clear the command after processing
                 break
+            
+    def handle_navigate(self,data):
+        self.specific_bot_goal_flag_array = [False] * self.num_bots
+        _, center_lat, center_lon, num_uavs, grid_space, coverage_area = data.split(",")
+        curve = NavigationGridGenerator(
+        self.origin,
+        float(center_lat),
+        float(center_lon),
+        int(num_uavs),
+        int(grid_space),
+        int(coverage_area),
+        )
+        path = curve.navigate_grid()
+        multiple_goals = path
+        
+        self.rebuild_simulation()
+        
+        ind = 0
+        while True:
+            sleep(sleep_times.get(self.num_bots, 0.1))
+            for i, b in enumerate(self.s.swarm):
+                goal = multiple_goals[0][ind]
+                gx, gy = locatePosition.geoToCart(self.origin, self.endDistance, goal)
+                goal   = (gx / 2, gy / 2)
+                cmd    = cvg.goal_area_cvg(i, b, goal)
+                cmd.exec(b)
                 
-class StopSwarm:
-    def __init__(self):
-        self._cmd_queue = []
+                if abs(goal[0] - b.x) <= 3 and abs(goal[1] - b.y) <= 3:
+                    ind += 1
+                    if ind >= len(multiple_goals[0]):
+                        break
+                lat, lon = locatePosition.cartToGeo(self.origin, self.endDistance, [b.x * 2, b.y * 2])
+                self._goto(i, lat, lon)
+                
+            if self._peek_command():
+                self._pop_command()
+                break
+            
+    def handle_search(self,data):
+        self.specific_bot_goal_flag_array = [False] * self.num_bots
+        
+        if data.startswith("searchpolygon_"):
+            obstacles_latlon = []
+            _, polygon_latlon_array, num_uavs, grid_spacing, uid = data.split("_")
+            polygon_latlon = json.loads(polygon_latlon_array)
+            print(f"Initializing PolygonSearchGrid for {len(self.pos_array)} drones...")
+            planner = PolygonSearchGrid(polygon_latlon=polygon_latlon,origin_gps=self.origin,endDistance=self.endDistance,drone_list=self.pos_array,grid_spacing=int(grid_spacing),rotation_angle=90,obstacles_latlon=obstacles_latlon)
+            
+            planner.generate_paths()
+            planner.save_paths()
+            
+        else:
+            (
+            _,
+            center_lat,
+            center_lon,
+            num_uavs,
+            grid_space,
+            coverage_area,
+            uid,
+            ) = data.split(",")
+            curve = SearchGridGenerator(
+                self.origin,
+                float(center_lat),
+                float(center_lon),
+                self.pos_array,
+                int(grid_space),
+                int(coverage_area),
+            )
+            val = curve.generate_grids()
+            # Clear cache so drones read the newly generated grids
+            print(num_uavs, "num_uavs")
+        search_step = 1
+        active_bot_count = len(self.pos_array)
+        all_uav_csv_grid_array = [0] * active_bot_count
+        # FIX: Use len(self.pos_array) not active_bot_count, which may be stale
+        # if a drone was removed before this fresh search start.
+        pop_flag_arr = [1] * len(self.pos_array)
+        self.rebuild_simulation()
+        
+        active_bot_count = len(self.s.swarm)
+        
+        print("Search Started")
+        search_flag_val = 0
+        f = ""
+        # num_lines = [0] * active_bot_count
+        goal_position = []
+        cwd = os.getcwd()
+        print("search_flag_val", search_flag_val)
+        grid_path_array = [0] * len(self.pos_array)
+        all_uav_csv_grid_array = [0] * len(self.pos_array)
+        if search_flag_val == 0:
+            search_flag_val += 1
+            self.csv_file_paths = [None] * len(self.pos_array)
+            num_lines = [0] * len(self.pos_array)
+            for i, e in enumerate(self.pos_array):
+                print("Checking CSV for drone:", e)
+                path = os.path.join(cwd, "searchgrid", f"d{e}.csv")
+                print("Checking:", path)
 
-    def _push_command(self, data):
-        self._cmd_queue.append(data)
+                if not os.path.exists(path):
+                    print(
+                        f"WARNING: Grid missing for drone {e}, initializing as idle"
+                    )
+                    self.csv_file_paths[i] = None
+                    num_lines[i] = 0
+                    continue
+                self.csv_file_paths[i] = path
+                with open(path) as f_in:
+                    reader = csv.reader(f_in)
+                    num_lines[i] = len(list(reader))
+                    
+        while True:
+            sleep(sleep_times.get(self.num_bots, 0.1))
+            
+            if self._peek_command():
+                print("STOP command detected in handle_search. Stopping the swarm...")
+                self._pop_command()
+                break
 
-    def _peek_command(self):
-        return self._cmd_queue[0] if self._cmd_queue else None
-
-    def _pop_command(self):
-        return self._cmd_queue.pop(0) if self._cmd_queue else None
-
+        
+        
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Swarm Server Controller")
@@ -467,15 +625,29 @@ if __name__ == "__main__":
         
         try:
             data,add = sock2.monitor()
-            print(f"Received message from {add}: {data} in sock2")
+            print(f"Received message from {add}: {data} in sock2")   
             
             if data is None:
                 print("No data received. Continuing main loop...")
+                
             elif data.startswith("different"):
                 swarm_controller.handle_different_height(data)
                 
             elif data.startswith("specificbotgoal"):
+                swarm_controller._pop_command()
                 swarm_controller.handle_specific_bot_goal(data)
+            
+            elif data.startswith("goal"):
+                swarm_controller._pop_command()
+                swarm_controller.handle_goal(data)
+                
+            elif data.startswith("navigate"):
+                swarm_controller._pop_command()
+                swarm_controller.handle_navigate(data)
+                
+            elif data.startswith("search"):
+                swarm_controller._pop_command()
+                swarm_controller.handle_search(data)
                 
             else:
                 print("No recognized command received. Continuing main loop...")

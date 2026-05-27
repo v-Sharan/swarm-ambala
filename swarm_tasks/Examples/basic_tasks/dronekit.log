@@ -1,0 +1,9 @@
+Link timeout, no heartbeat in last 5 seconds
+Exception in MAVLink input loop
+Traceback (most recent call last):
+  File "F:\copter\.venv\lib\site-packages\dronekit\mavlink.py", line 211, in mavlink_thread_in
+    fn(self)
+  File "F:\copter\.venv\lib\site-packages\dronekit\__init__.py", line 1370, in listener
+    raise APIException('No heartbeat in %s seconds, aborting.' %
+dronekit.APIException: No heartbeat in 30 seconds, aborting.
+Link timeout, no heartbeat in last 5 seconds
